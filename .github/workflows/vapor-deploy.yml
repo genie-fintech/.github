@@ -12,6 +12,11 @@ on:
                 type: string
                 description: 'Deploy Target'
                 default: "['staging', 'uat']"
+            tag:
+                type: string
+                description: 'Tag / Branch / SHA'
+                required: true
+                default: main
 
 concurrency:
     group: ${{ github.workflow }}
@@ -22,18 +27,18 @@ jobs:
         name: Review info
         runs-on: ubuntu-latest
         steps:
-            - name: Target - ${{ github.event.inputs.tag }}
+            - name: Target - ${{ inputs.tag }}
               run: ''
 
     deploy:
-        name: Deploy to ${{ github.event.inputs.deploy_target }} by @${{ github.actor }}
+        name: Deploy to ${{ inputs.deploy_target }} by @${{ github.actor }}
         needs: [ review ]
         runs-on: ubuntu-latest
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.inputs.tag }}
+                  ref: ${{ inputs.tag }}
 
             - name: Setup PHP
               uses: shivammathur/setup-php@v2
@@ -45,8 +50,8 @@ jobs:
             - name: CUSTOM VAR
               id: custom-variable
               run: |
-                  echo "commit_id=$(git show ${{github.event.inputs.tag}} -s --format=%H)" >> $GITHUB_OUTPUT
-                  echo "commit_message=$(git show ${{github.event.inputs.tag}} -s --format=%s)" >> $GITHUB_OUTPUT
+                  echo "commit_id=$(git show ${{inputs.tag}} -s --format=%H)" >> $GITHUB_OUTPUT
+                  echo "commit_message=$(git show ${{inputs.tag}} -s --format=%s)" >> $GITHUB_OUTPUT
                   echo "::set-output name=cache_dir::$(composer config cache-files-dir)"
 
             - name: Composer & GitHub Authentication
