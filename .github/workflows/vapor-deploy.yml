@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+    workflow_call:
+        inputs:
+            php-version:
+                description: 'PHP version.'
+                type: string
+                required: true
+                default: "['8.2', '8.3', '8.4']"
+            deploy_target:
+                type: string
+                description: 'Deploy Target'
+                default: "['staging', 'uat']"
+
+concurrency:
+    group: ${{ github.workflow }}
+    cancel-in-progress: true
+
+jobs:
+    review:
+        name: Review info
+        runs-on: ubuntu-latest
+        steps:
+            - name: Target - ${{ github.event.inputs.tag }}
+              run: ''
+
+    deploy:
+        name: Deploy to ${{ github.event.inputs.deploy_target }} by @${{ github.actor }}
+        needs: [ review ]
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event.inputs.tag }}
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ inputs.php-version }}
+                  tools: composer:v2
+                  coverage: none
+
+            - name: CUSTOM VAR
+              id: custom-variable
+              run: |
+                  echo "commit_id=$(git show ${{github.event.inputs.tag}} -s --format=%H)" >> $GITHUB_OUTPUT
+                  echo "commit_message=$(git show ${{github.event.inputs.tag}} -s --format=%s)" >> $GITHUB_OUTPUT
+                  echo "::set-output name=cache_dir::$(composer config cache-files-dir)"
+
+            - name: Composer & GitHub Authentication
+              run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Get Composer Cache Directory
+              id: composer-cache
+              run: |
+                  echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+            - uses: actions/cache@v4
+              id: actions-cache
+              with:
+                  path: ${{ steps.composer-cache.outputs.dir }}
+                  key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+                  restore-keys: |
+                      ${{ runner.os }}-composer-
+
+            - name: Cache PHP dependencies
+              uses: actions/cache@v4
+              id: vendor-cache
+              with:
+                  path: vendor
+                  key: ${{ runner.OS }}-build-${{ hashFiles('**/composer.lock') }}
+
+            - name: Require Vapor CLI
+              run: composer global require laravel/vapor-cli
+
+            - name: Install Project Dependencies
+              run: composer install --no-interaction --prefer-dist --optimize-autoloader
+
+            - name: Deploy Environment
+              run: vapor deploy ${{ inputs.deploy_target }} --commit="${{ steps.custom-variable.outputs.commit_id }}" --message="${{ steps.custom-variable.outputs.commit_message }}"
+              env:
+                  VAPOR_API_TOKEN: ${{ secrets.VAPOR_API_TOKEN }}

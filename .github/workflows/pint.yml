@@ -1,0 +1,43 @@
+name: Check & fix styling
+
+on:
+    workflow_call:
+        inputs:
+            php-version:
+                description: 'PHP version.'
+                type: string
+                required: true
+                default: "['8.2', '8.3', '8.4']"
+
+jobs:
+    pint:
+        runs-on: ubuntu-22.04
+
+        strategy:
+            fail-fast: true
+
+        steps:
+            - name: Check out repository code
+              uses: actions/checkout@v4
+
+            - name: Setup PHP
+              uses: shivammathur/setup-php@v2
+              with:
+                  php-version: ${{ inputs.php-version }}
+                  tools: composer:v2
+                  coverage: none
+
+            - name: Composer & GitHub Authentication
+              run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Add HTTP basic auth credentials
+              run: echo '${{ secrets.COMPOSER_AUTH_JSON }}' > $GITHUB_WORKSPACE/auth.json
+
+            - name: Install composer dependencies
+              run: composer install -n --prefer-dist
+              env:
+                  COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH_JSON }}
+
+            - name: Check code style
+              timeout-minutes: 2
+              run: ./vendor/bin/pint --test --preset laravel
