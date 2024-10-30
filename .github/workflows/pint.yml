@@ -1,43 +1,76 @@
-name: Check & fix styling
+name: Check Coding Style
 
 on:
-    workflow_call:
-        inputs:
-            php-version:
-                description: 'PHP version.'
-                type: string
-                required: true
-                default: "['8.2', '8.3', '8.4']"
+  workflow_call:
+    inputs:
+      php-version:
+        description: "PHP version"
+        required: true
+        type: string
+        default: "8.2"
+      operating-system:
+        description: "Operating system"
+        required: false
+        type: string
+        default: "ubuntu-22.04"
+      timeout-minutes:
+        description: "Timeout minutes"
+        required: false
+        type: number
+        default: 2
 
 jobs:
-    pint:
-        runs-on: ubuntu-22.04
+  pint:
+    name: Check Coding Style
 
-        strategy:
-            fail-fast: true
+    runs-on: ${{inputs.operating-system}}
 
-        steps:
-            - name: Check out repository code
-              uses: actions/checkout@v4
+    strategy:
+      fail-fast: true
 
-            - name: Setup PHP
-              uses: shivammathur/setup-php@v2
-              with:
-                  php-version: ${{ inputs.php-version }}
-                  tools: composer:v2
-                  coverage: none
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
 
-            - name: Composer & GitHub Authentication
-              run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          tools: composer:v2
+          coverage: none
 
-            - name: Add HTTP basic auth credentials
-              run: echo '${{ secrets.COMPOSER_AUTH_JSON }}' > $GITHUB_WORKSPACE/auth.json
+      - name: Composer & GitHub Authentication
+        run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Install composer dependencies
-              run: composer install -n --prefer-dist
-              env:
-                  COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH_JSON }}
+      - name: Add HTTP basic auth credentials
+        run: echo '${{ secrets.COMPOSER_AUTH_JSON }}' > $GITHUB_WORKSPACE/auth.json
 
-            - name: Check code style
-              timeout-minutes: 2
-              run: ./vendor/bin/pint --test --preset laravel
+      - name: Get Composer Cache Directory
+        id: composer-cache
+        run: |
+          echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-${{ inputs.php-version }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.php-version }}-composer-
+
+      - name: Cache project dependencies
+        uses: actions/cache@v4
+        with:
+          path: ./vendor
+          key: ${{ runner.os }}-${{ inputs.php-version }}-vendor-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.php-version }}-vendor-
+
+      - name: Install project dependencies
+        run: composer install -n --prefer-dist
+        env:
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH_JSON }}
+
+      - name: Check coding style
+        timeout-minutes: ${{ inputs.timeout-minutes }}
+        run: ./vendor/bin/pint --test --preset laravel
