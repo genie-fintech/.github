@@ -1,45 +1,89 @@
-name: static analysis
+name: Static Analysis
 
 on:
-    workflow_call:
-        inputs:
-            php-version:
-                description: 'PHP version.'
-                type: string
-                required: true
-                default: "['8.2', '8.3', '8.4']"
+  workflow_call:
+    inputs:
+      php-version:
+        description: "PHP version"
+        required: true
+        type: string
+        default: "8.2"
+      operating-system:
+        description: "Operating system"
+        required: false
+        type: string
+        default: "ubuntu-22.04"
+      timeout-minutes:
+        description: "Timeout minutes"
+        required: false
+        type: number
+        default: 2
+      phpstan-tmp-dir:
+        description: "PHPStan tmp dir"
+        required: false
+        type: string
+        default: "/tmp/phpstan"
 
 jobs:
-    phpstan:
-        runs-on: ubuntu-22.04
+  phpstan:
+    name: Static Analysis
 
-        strategy:
-            fail-fast: true
+    runs-on: ${{inputs.operating-system}}
 
-        name: Static Analysis
+    strategy:
+      fail-fast: true
 
-        steps:
-            - name: Check out repository code
-              uses: actions/checkout@v4
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
 
-            - name: Setup PHP
-              uses: shivammathur/setup-php@v2
-              with:
-                  php-version: ${{ inputs.php-version }}
-                  tools: composer:v2
-                  coverage: none
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ inputs.php-version }}
+          tools: composer:v2
+          coverage: none
 
-            - name: Composer & GitHub Authentication
-              run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
+      - name: Composer & GitHub Authentication
+        run: composer config github-oauth.github.com ${{ secrets.GITHUB_TOKEN }}
 
-            - name: Add HTTP basic auth credentials
-              run: echo '${{ secrets.COMPOSER_AUTH_JSON }}' > $GITHUB_WORKSPACE/auth.json
+      - name: Add HTTP basic auth credentials
+        run: echo '${{ secrets.COMPOSER_AUTH_JSON }}' > $GITHUB_WORKSPACE/auth.json
 
-            - name: Install composer dependencies
-              run: composer install -n --prefer-dist
-              env:
-                  COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH_JSON }}
+      - name: Get composer cache directory
+        id: composer-cache
+        run: |
+          echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
 
-            - name: Run PHPStan
-              timeout-minutes: 2
-              run: ./vendor/bin/phpstan analyse --error-format=github
+      - name: Cache composer cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-${{ inputs.php-version }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.php-version }}-composer-
+
+      - name: Cache project dependencies
+        uses: actions/cache@v4
+        with:
+          path: ./vendor
+          key: ${{ runner.temp }}-${{ inputs.php-version }}-vendor-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ inputs.php-version }}-vendor-
+
+      - name: Install project dependencies
+        run: composer install -n --prefer-dist
+        env:
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH_JSON }}
+
+      - name: Cache PHPStan result cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ inputs.phpstan-tmp-dir }}
+          key: phpstan-result-cache-${{ github.run_id }}
+          restore-keys: |
+            phpstan-result-cache-
+
+      - name: Run PHPStan
+        timeout-minutes: ${{ inputs.timeout-minutes }}
+        run: ./vendor/bin/phpstan analyse --error-format=github
